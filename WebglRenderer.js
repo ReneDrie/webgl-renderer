@@ -1,26 +1,47 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
 var WebglRenderer = (function () {
-    function WebglRenderer(canvas, shader, _animationLoop) {
+    /**
+     * Requires a HTMLCanvasElement and a shader program as a plain text string
+     *
+     * @param _canvas
+     * @param shader
+     * @param _animationLoop
+     */
+    function WebglRenderer(_canvas, shader, _animationLoop) {
         if (_animationLoop === void 0) { _animationLoop = true; }
-        this.canvas = canvas;
+        this._canvas = _canvas;
         this._animationLoop = _animationLoop;
-        this._width = 0.0;
-        this._height = 0.0;
+        this._width = 0;
+        this._height = 0;
         // image input
         this._textures = []; // <slotIndex> = texture ID
-        this._time = 0.0;
-        this._gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        this._time = 0;
+        this._gl = this._canvas.getContext('webgl') || this._canvas.getContext('experimental-webgl');
         if (!this._gl) {
-            console.error('WebglRenderer: Failed to request a 3D context, aborting...');
+            console.error('ImageEffectRender: Failed to request a 3D context, aborting...');
             return;
         }
         // one-time setup
         this.compileShader(shader);
         this.generateNDCQuad();
+        // gl configuration
+        this._gl.clearColor(0, 0, 0, 1);
+        this._gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+        this._width = this._canvas.width;
+        this._height = this._canvas.height;
     }
+    /**
+     * Add Image to the GL, This can be an HTMLImageElement or a rendered Canvas
+     *
+     * @param image
+     * @param slotIndex
+     * @param clampToEdge
+     */
     WebglRenderer.prototype.addImage = function (image, slotIndex, clampToEdge) {
         if (clampToEdge === void 0) { clampToEdge = true; }
         if (slotIndex >= 4) {
-            console.log('WebglRenderer: A maximum of 4 slots is available, slotIndex is out of bounds.');
+            console.log('ImageEffectRender: A maximum of 4 slots is available, slotIndex is out of bounds.');
         }
         if (!this._textures[slotIndex]) {
             this._textures[slotIndex] = this._gl.createTexture();
@@ -37,7 +58,7 @@ var WebglRenderer = (function () {
     };
     WebglRenderer.prototype.play = function () {
         if (!this._requestAnimationID) {
-            this.draw(0.0);
+            this.draw(0);
         }
     };
     WebglRenderer.prototype.stop = function () {
@@ -62,10 +83,10 @@ var WebglRenderer = (function () {
         this._gl.uniform1f(this._uniformGlobalTime, this._time);
         this._gl.uniform2f(this._uniformResolution, this._canvas.width, this._canvas.height);
         // texture/channel uniforms
-        this._textures.forEach(function (texture, index) {
-            _this._gl.activeTexture(_this._gl.TEXTURE0 + index);
-            _this._gl.bindTexture(_this._gl.TEXTURE_2D, texture);
-        });
+        for (var slotIndex = 0; slotIndex < this._textures.length; ++slotIndex) {
+            this._gl.activeTexture(this._gl.TEXTURE0 + slotIndex);
+            this._gl.bindTexture(this._gl.TEXTURE_2D, this._textures[slotIndex]);
+        }
         // render NDC quad
         this._gl.bindBuffer(this._gl.ARRAY_BUFFER, this._quadVBO);
         this._gl.enableVertexAttribArray(this._posAttributeIndex);
@@ -82,25 +103,23 @@ var WebglRenderer = (function () {
         var vs = this._gl.createShader(this._gl.VERTEX_SHADER);
         var fs = this._gl.createShader(this._gl.FRAGMENT_SHADER);
         // vertex shader
-        var vsSource = "\n\t\t\tattribute vec2 aPos;\n\t\t\tattribute vec2 aUV;\n\t\t\t\n\t\t\tvarying vec2 vUV0;\n\t\t\t\n\t\t\tvoid main(void) {\n                vUV0 = aUV;\n                gl_Position = vec4(aPos, 0.0, 1.0);\n            }\n\t\t";
+        var vsSource = "\n            attribute vec2 aPos;\n            attribute vec2 aUV;\n            \n            varying vec2 vUV0;\n            \n            void main(void) {\n                vUV0 = aUV;\n                gl_Position = vec4(aPos, 0.0, 1.0);\n            }\n        ";
         this._gl.shaderSource(vs, vsSource);
         this._gl.compileShader(vs);
         var success = this._gl.getShaderParameter(vs, this._gl.COMPILE_STATUS);
         if (!success) {
-            var infoLog = this._gl.getShaderInfoLog(vs);
-            console.error('WebglRenderer: Vertex shader compilation failed:');
-            console.error(infoLog);
+            console.error('ImageEffectRender: Vertex shader compilation failed:');
+            console.error(this._gl.getShaderInfoLog(vs));
         }
         // fragment shader
-        var fsMainSource = "\n            #ifdef GL_ES\n                precision highp float;\n            #endif\n            \n            varying vec2 vUV0;\n            \n            uniform vec2 iResolution;\n            uniform float iGlobalTime;\n            uniform vec4 iMouse;\n            \n            uniform sampler2D iChannel0;\n            uniform sampler2D iChannel1;\n            uniform sampler2D iChannel2;\n            uniform sampler2D iChannel3;\n            \n            uniform vec2 iChannelResolution0;\n            uniform vec2 iChannelResolution1;\n            uniform vec2 iChannelResolution2;\n            uniform vec2 iChannelResolution3;\n            \n            void mainImage(out vec4, vec2);\n            \n            vec4 texture(sampler2D tex, vec2 uv)\n            {\n                return texture2D(tex, uv);\n            }\n            \n            void main(void) {\n                mainImage(gl_FragColor, gl_FragCoord.\n                gl_FragColor.a = 1.0;\n            }\n        ";
+        var fsMainSource = "\n            #ifdef GL_ES\n                precision highp float;\n            #endif\n            \n            varying vec2 vUV0;\n            \n            uniform vec2 iResolution;\n            uniform float iGlobalTime;\n            uniform vec4 iMouse;\n            \n            uniform sampler2D iChannel0;\n            uniform sampler2D iChannel1;\n            uniform sampler2D iChannel2;\n            uniform sampler2D iChannel3;\n            \n            uniform vec2 iChannelResolution0;\n            uniform vec2 iChannelResolution1;\n            uniform vec2 iChannelResolution2;\n            uniform vec2 iChannelResolution3;\n            \n            void mainImage(out vec4, vec2);\n            \n            vec4 texture(sampler2D tex, vec2 uv)\n            {\n                return texture2D(tex, uv);\n            }\n            \n            void main(void) {\n                mainImage(gl_FragColor, gl_FragCoord.xy);\n                gl_FragColor.a = 1.0; \n            }\n        ";
         fsSource = fsMainSource + fsSource;
         this._gl.shaderSource(fs, fsSource);
         this._gl.compileShader(fs);
         success = this._gl.getShaderParameter(fs, this._gl.COMPILE_STATUS);
         if (!success) {
-            var infoLog = this._gl.getShaderInfoLog(fs);
-            console.error('WebglRenderer: Shader compilation failed:');
-            console.error(infoLog);
+            console.error('ImageEffectRender: Shader compilation failed:');
+            console.error(this._gl.getShaderInfoLog(fs));
         }
         // link shaders
         this._gl.attachShader(this._program, vs);
@@ -108,9 +127,8 @@ var WebglRenderer = (function () {
         this._gl.linkProgram(this._program);
         success = this._gl.getProgramParameter(this._program, this._gl.LINK_STATUS);
         if (!success) {
-            var infoLog = this._gl.getProgramInfoLog(this._program);
-            console.error('WebglRenderer: Program linking failed:');
-            console.error(infoLog);
+            console.error('ImageEffectRender: Program linking failed:');
+            console.error(this._gl.getProgramInfoLog(this._program));
         }
         // get attribute locations
         this._posAttributeIndex = this._gl.getAttribLocation(this._program, 'aPos');
@@ -122,11 +140,11 @@ var WebglRenderer = (function () {
     };
     WebglRenderer.prototype.generateNDCQuad = function () {
         var vertices = new Float32Array([
-            // pos      // uv
-            -1.0, 1.0, 0.0, 1.0,
-            -1.0, -1.0, 0.0, 0.0,
-            1.0, 1.0, 1.0, 1.0,
-            1.0, -1.0, 1.0, 0.0,
+            // pos  // uv
+            -1, 1, 0, 1,
+            -1, -1, 0, 0,
+            1, 1, 1, 1,
+            1, -1, 1, 0,
         ]);
         this._quadVBO = this._gl.createBuffer();
         this._gl.bindBuffer(this._gl.ARRAY_BUFFER, this._quadVBO);
@@ -141,7 +159,8 @@ var WebglRenderer = (function () {
         this._quadVBO = null;
         this._gl.deleteProgram(this._program);
         this._program = null;
-        this._requestAnimationID = null;
+        this.stop();
     };
     return WebglRenderer;
 }());
+exports.default = WebglRenderer;

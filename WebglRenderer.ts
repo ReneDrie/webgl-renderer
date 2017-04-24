@@ -2,9 +2,8 @@ class WebglRenderer {
 
 	// webgl
 	private _gl:WebGLRenderingContext;
-	private _canvas:HTMLCanvasElement;
-	private _width:number = 0.0;
-	private _height:number = 0.0;
+	private _width:number = 0;
+	private _height:number = 0;
 
 	// image input
 	private _textures:WebGLTexture[] = []; // <slotIndex> = texture ID
@@ -23,14 +22,20 @@ class WebglRenderer {
 
 	// control
 	private _requestAnimationID:number;
-	private _time:number = 0.0;
+	private _time:number = 0;
 
-	constructor(public canvas:HTMLCanvasElement, shader:string, private _animationLoop:boolean = true) {
-
-		this._gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+	/**
+	 * Requires a HTMLCanvasElement and a shader program as a plain text string
+	 *
+	 * @param _canvas
+	 * @param shader
+	 * @param _animationLoop
+	 */
+	constructor(private _canvas:HTMLCanvasElement, shader:string, private _animationLoop:boolean = true) {
+		this._gl = this._canvas.getContext('webgl') || this._canvas.getContext('experimental-webgl');
 
 		if (!this._gl) {
-			console.error('WebglRenderer: Failed to request a 3D context, aborting...');
+			console.error('ImageEffectRender: Failed to request a 3D context, aborting...');
 			return;
 		}
 
@@ -38,31 +43,51 @@ class WebglRenderer {
 		this.compileShader(shader);
 		this.generateNDCQuad();
 
+		// gl configuration
+		this._gl.clearColor(0, 0, 0, 1);
+		this._gl.viewport(0, 0, this._canvas.width, this._canvas.height);
+		this._width = this._canvas.width;
+		this._height = this._canvas.height;
 	}
 
+	/**
+	 * Add Image to the GL, This can be an HTMLImageElement or a rendered Canvas
+	 *
+	 * @param image
+	 * @param slotIndex
+	 * @param clampToEdge
+	 */
 	public addImage(image:HTMLImageElement, slotIndex:number, clampToEdge:boolean = true):void {
 		if (slotIndex >= 4) {
-			console.log('WebglRenderer: A maximum of 4 slots is available, slotIndex is out of bounds.');
+			console.log('ImageEffectRender: A maximum of 4 slots is available, slotIndex is out of bounds.');
 		}
 
 		if (!this._textures[slotIndex]) {
 			this._textures[slotIndex] = this._gl.createTexture();
 			this._gl.useProgram(this._program);
 			this._gl.uniform1i(this._gl.getUniformLocation(this._program, 'iChannel' + slotIndex), slotIndex);
-			this._gl.uniform2f(this._gl.getUniformLocation(this._program, 'iChannelResolution' + slotIndex), image.width, image.height);
+			this._gl.uniform2f(
+				this._gl.getUniformLocation(this._program, 'iChannelResolution' + slotIndex),
+				image.width,
+				image.height,
+			);
 		}
 
 		this._gl.bindTexture(this._gl.TEXTURE_2D, this._textures[slotIndex]);
 		this._gl.texImage2D(this._gl.TEXTURE_2D, 0, this._gl.RGB, this._gl.RGB, this._gl.UNSIGNED_BYTE, image);
-		this._gl.texParameteri(this._gl.TEXTURE_2D, this._gl.TEXTURE_WRAP_S, clampToEdge ? this._gl.CLAMP_TO_EDGE : this._gl.REPEAT);
-		this._gl.texParameteri(this._gl.TEXTURE_2D, this._gl.TEXTURE_WRAP_T, clampToEdge ? this._gl.CLAMP_TO_EDGE : this._gl.REPEAT);
+		this._gl.texParameteri(
+			this._gl.TEXTURE_2D, this._gl.TEXTURE_WRAP_S, clampToEdge ? this._gl.CLAMP_TO_EDGE : this._gl.REPEAT,
+		);
+		this._gl.texParameteri(
+			this._gl.TEXTURE_2D, this._gl.TEXTURE_WRAP_T, clampToEdge ? this._gl.CLAMP_TO_EDGE : this._gl.REPEAT,
+		);
 		this._gl.texParameteri(this._gl.TEXTURE_2D, this._gl.TEXTURE_MIN_FILTER, this._gl.LINEAR);
 		this._gl.texParameteri(this._gl.TEXTURE_2D, this._gl.TEXTURE_MAG_FILTER, this._gl.LINEAR);
 	}
 
 	public play():void {
 		if (!this._requestAnimationID) {
-			this.draw(0.0);
+			this.draw(0);
 		}
 	}
 
@@ -73,11 +98,11 @@ class WebglRenderer {
 		}
 	}
 
-	public draw(time:number):void {
+	private draw(time:number):void {
 		this._time = time / 1000;
 
 		// determine if screen has been resized. If so, adjust viewport
-		if(this._canvas.width !== this._width || this._canvas.height !== this._height) {
+		if (this._canvas.width !== this._width || this._canvas.height !== this._height) {
 			this._gl.viewport(0, 0, this._canvas.width, this._canvas.height);
 			this._width = this._canvas.width;
 			this._height = this._canvas.height;
@@ -93,55 +118,56 @@ class WebglRenderer {
 		this._gl.uniform2f(this._uniformResolution, this._canvas.width, this._canvas.height);
 
 		// texture/channel uniforms
-		this._textures.forEach((texture, index) => {
-			this._gl.activeTexture(this._gl.TEXTURE0 + index);
-			this._gl.bindTexture(this._gl.TEXTURE_2D, texture);
-		});
+		for (let slotIndex:number = 0; slotIndex < this._textures.length; ++slotIndex) {
+			this._gl.activeTexture(this._gl.TEXTURE0 + slotIndex);
+			this._gl.bindTexture(this._gl.TEXTURE_2D, this._textures[slotIndex]);
+		}
 
 		// render NDC quad
 		this._gl.bindBuffer(this._gl.ARRAY_BUFFER, this._quadVBO);
 		this._gl.enableVertexAttribArray(this._posAttributeIndex);
-		this._gl.vertexAttribPointer(this._posAttributeIndex, 2, this._gl.FLOAT, false, 4 * 4, 0); // 4 32-bit values = 4 4-byte values
+		this._gl.vertexAttribPointer(
+			this._posAttributeIndex, 2, this._gl.FLOAT, false, 4 * 4, 0,
+		); // 4 32-bit values = 4 4-byte values
 		this._gl.enableVertexAttribArray(this._uvAttributeIndex);
 		this._gl.vertexAttribPointer(this._uvAttributeIndex, 2, this._gl.FLOAT, false, 4 * 4, 2 * 4);
 
 		this._gl.drawArrays(this._gl.TRIANGLE_STRIP, 0, 4);
 
-		if(this._animationLoop) {
-			this._requestAnimationID = window.requestAnimationFrame((time) => this.draw(time));
+		if (this._animationLoop) {
+			this._requestAnimationID = window.requestAnimationFrame(time => this.draw(time));
 		}
 	}
 
 	private compileShader(fsSource:string):void {
 		this._program = this._gl.createProgram();
 
-		let vs = this._gl.createShader(this._gl.VERTEX_SHADER);
-		let fs = this._gl.createShader(this._gl.FRAGMENT_SHADER);
+		const vs = this._gl.createShader(this._gl.VERTEX_SHADER);
+		const fs = this._gl.createShader(this._gl.FRAGMENT_SHADER);
 
 		// vertex shader
-		let vsSource:string = `
-			attribute vec2 aPos;
-			attribute vec2 aUV;
-			
-			varying vec2 vUV0;
-			
-			void main(void) {
+		const vsSource:string = `
+            attribute vec2 aPos;
+            attribute vec2 aUV;
+            
+            varying vec2 vUV0;
+            
+            void main(void) {
                 vUV0 = aUV;
                 gl_Position = vec4(aPos, 0.0, 1.0);
             }
-		`;
+        `;
 		this._gl.shaderSource(vs, vsSource);
 		this._gl.compileShader(vs);
 
 		let success = this._gl.getShaderParameter(vs, this._gl.COMPILE_STATUS);
 		if (!success) {
-			let infoLog = this._gl.getShaderInfoLog(vs);
-			console.error('WebglRenderer: Vertex shader compilation failed:');
-			console.error(infoLog);
+			console.error('ImageEffectRender: Vertex shader compilation failed:');
+			console.error(this._gl.getShaderInfoLog(vs));
 		}
 
 		// fragment shader
-		let fsMainSource:string = `
+		const fsMainSource:string = `
             #ifdef GL_ES
                 precision highp float;
             #endif
@@ -170,8 +196,8 @@ class WebglRenderer {
             }
             
             void main(void) {
-                mainImage(gl_FragColor, gl_FragCoord.
-                gl_FragColor.a = 1.0;
+                mainImage(gl_FragColor, gl_FragCoord.xy);
+                gl_FragColor.a = 1.0; 
             }
         `;
 		fsSource = fsMainSource + fsSource;
@@ -180,9 +206,8 @@ class WebglRenderer {
 
 		success = this._gl.getShaderParameter(fs, this._gl.COMPILE_STATUS);
 		if (!success) {
-			let infoLog = this._gl.getShaderInfoLog(fs);
-			console.error('WebglRenderer: Shader compilation failed:');
-			console.error(infoLog);
+			console.error('ImageEffectRender: Shader compilation failed:');
+			console.error(this._gl.getShaderInfoLog(fs));
 		}
 
 		// link shaders
@@ -192,9 +217,8 @@ class WebglRenderer {
 
 		success = this._gl.getProgramParameter(this._program, this._gl.LINK_STATUS);
 		if (!success) {
-			let infoLog = this._gl.getProgramInfoLog(this._program);
-			console.error('WebglRenderer: Program linking failed:');
-			console.error(infoLog);
+			console.error('ImageEffectRender: Program linking failed:');
+			console.error(this._gl.getProgramInfoLog(this._program));
 		}
 
 		// get attribute locations
@@ -208,12 +232,12 @@ class WebglRenderer {
 	}
 
 	private generateNDCQuad():void {
-		let vertices:Float32Array = new Float32Array([
-			// pos      // uv
-			-1.0,  1.0, 0.0, 1.0,
-			-1.0, -1.0, 0.0, 0.0,
-			1.0,  1.0,  1.0, 1.0,
-			1.0, -1.0,  1.0, 0.0,
+		const vertices:Float32Array = new Float32Array([
+			// pos  // uv
+			-1, 1,  0, 1,
+			-1, -1, 0, 0,
+			1,  1,  1, 1,
+			1, -1,  1, 0,
 		]);
 		this._quadVBO = this._gl.createBuffer();
 		this._gl.bindBuffer(this._gl.ARRAY_BUFFER, this._quadVBO);
@@ -221,7 +245,7 @@ class WebglRenderer {
 	}
 
 	public destruct():void {
-		for(let i:number = 0; i < this._textures.length; ++i) {
+		for (let i:number = 0; i < this._textures.length; ++i) {
 			this._gl.deleteTexture(this._textures[i]);
 			this._textures[i] = null;
 		}
@@ -232,6 +256,8 @@ class WebglRenderer {
 		this._gl.deleteProgram(this._program);
 		this._program = null;
 
-		this._requestAnimationID = null;
+		this.stop();
 	}
 }
+
+export default WebglRenderer;
